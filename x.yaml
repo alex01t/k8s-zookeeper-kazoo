@@ -1,0 +1,97 @@
+---
+apiVersion: apps/v1
+#kind: StatefulSet
+kind: Deployment
+metadata:
+  name: xapp
+spec:
+  replicas: 3
+  revisionHistoryLimit: 1
+  selector:
+    matchLabels:
+      app: xapp
+#  serviceName: xapp
+  template:
+    metadata:
+      labels:
+        app: xapp
+    spec:
+      containers:
+      - command:
+        - bash
+        - -c
+        - |
+          # apt-get update -qqq && apt-get install -qqq iputils-ping vim netcat-openbsd
+          # pip3 install ipython kazoo
+          # trap : TERM INT; sleep inf & wait
+          pip3 install kazoo >/dev/null 2>&1
+
+          cat > app.py <<EOF
+          #!/usr/bin/env python
+
+          from kazoo.client import KazooClient
+          from kazoo.exceptions import LockTimeout
+          import time, os, sys, signal
+          z = KazooClient(hosts='zk-cs:2181')
+          z.start()
+          me = os.environ['HOSTNAME']
+          election = z.Election("/electionpath", me)
+          print(f"{me} is trying to elect.. contenders are {election.contenders()}")
+          stop_flag = False
+          def stop(_signo, _stack_frame):
+            print(f"stopping by signal {_signo}")
+            election.cancel()
+            global stop_flag
+            stop_flag = True
+          signal.signal(signal.SIGTERM, stop)
+          signal.signal(signal.SIGINT, stop)
+          def my_leader_function():
+            while not stop_flag:
+              print(f"{me} is running my_leader_function()")
+              time.sleep(2)
+            print("stop_flag is True, ending my_leader_function()")
+          election.run(my_leader_function)
+          print("bye")
+          EOF
+
+          chmod +x app.py
+          exec ./app.py
+        env:
+          - name: PYTHONUNBUFFERED
+            value: "1"
+        #
+#        ports:
+#        - containerPort: 5000
+#          name: raft
+#          protocol: TCP
+        #
+        image: python:3.10
+        imagePullPolicy: IfNotPresent
+        name: service
+        resources:
+          limits:
+            cpu: 4000m
+            memory: 500Mi
+          requests:
+            cpu: 10m
+            memory: 500Mi
+#---
+#apiVersion: v1
+#kind: Service
+#metadata:
+#  name: xapp
+#  labels:
+#    app: xapp
+#spec:
+#  clusterIP: None
+#  publishNotReadyAddresses: true
+#  selector:
+#    app: xapp
+#  ports:
+#    - name: raft
+#      port: 5000
+#      protocol: TCP
+#      targetPort: 5000
+#
+#
+
